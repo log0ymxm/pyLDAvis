@@ -31,7 +31,6 @@ var Data = function(data, config) {
     local_state.mdsData = extract_data(data['mdsDat'], local_state.K);
     local_state.mdsData3 = extract_data(data['token.table'], data['token.table'].Term.length);
     local_state.lamData = extract_data(data['tinfo'], data['tinfo'].Term.length);
-    local_state.dat3 = local_state.lamData.slice(0, local_state.R);
 
     var local_callbacks = {};
 
@@ -50,30 +49,19 @@ var Data = function(data, config) {
         return d;
     }
 
-    function state() {}
-
-    state.get = function(field) {
-        return local_state[field];
-    };
-
-    // TODO make sure these are cached in a sense, that is they
-    // only change on setters, and get is O(1)
-    state.defaultData = function() {
-        // dat3 has been truncated
-        return local_state.dat3.filter(function(d) {
-            return d.Category === "Default";
+    function updateData(field) {
+        local_state['termFiltered'] = local_state.mdsData3.filter(function(d) {
+            return d.Term === local_state.term;
         });
-    };
-
-    state.lamDataTerms = function() {
-        return state.defaultData().map(function(d) {return d.Term;});
-    };
-
-    // TODO this and above can be merged somehow
-    state.lamTopicData = function() {
-        return local_state.lamData
+        local_state['lamTopicData'] = local_state.lamData
             .filter(function(d) {
-                return d.Category === "Topic" + local_state.topic;
+                if (field === "tmp_topic" && local_state.tmp_topic != 0) {
+                    return d.Category === "Topic" + local_state.tmp_topic;
+                } else if (local_state.topic != 0) {
+                    return d.Category === "Topic" + local_state.topic;
+                } else {
+                    return d.Category === "Default";
+                }
             })
             .map(function(d) {
                 d.relevance = local_state.lambda * d.logprob +
@@ -82,17 +70,15 @@ var Data = function(data, config) {
             })
             .sort(fancysort("relevance"))
             .slice(0, local_state.R);
-    };
+        local_state['lamTopicTerms'] = local_state['lamTopicData'].map(function(d) {return d.Term;});
+        local_state['lamTopicMax'] = d3.max(local_state['lamTopicData'], function(d) {return d.Total;});
+    }
 
-    // TODO just recreates lamDataTerms functionality
-    state.lamData3Terms = function() {
-        return state.lamTopicData().map(function(d) {return d.Term;});
-    };
+    function state() {
+        updateData();
+    }
 
-    // TODO
-    state.lamMax = function() {
-        return d3.max(state.lamTopicData(), function(d) {return d.Total;});
-    };
+    state.get = function(field) {return local_state[field];};
 
     state.getElem = function(field, val) {
         var id = val || local_state[field];
@@ -119,6 +105,10 @@ var Data = function(data, config) {
         }
 
         local_state[field] = new_val;
+
+        updateData(field, new_val);
+
+        // Run all callbacks
         for (var i in local_callbacks[field]) {
             var cb = local_callbacks[field][i];
             cb(new_val, old_val);
@@ -165,6 +155,9 @@ var Data = function(data, config) {
         }
         return state;
     };
+
+    // Initialize state
+    state();
 
     return state;
 };
@@ -384,26 +377,30 @@ var LDAvis = function(to_select, data_or_file_name) {
         var defaultLabelMedium = "5%";
         var defaultLabelLarge = "10%";
 
-        d3.select("#" + leftPanelID).append("text")
+        d3.select("#" + leftPanelID)
+            .append("text")
             .attr("x", 10)
             .attr("y", mdsheight - 10)
             .attr('class', "circleGuideTitle")
             .style("text-anchor", "left")
             .style("fontWeight", "bold")
             .text("Marginal topic distribtion");
-        d3.select("#" + leftPanelID).append("text")
+        d3.select("#" + leftPanelID)
+            .append("text")
             .attr("x", cx2 + 10)
             .attr("y", mdsheight + 2 * newSmall)
             .attr('class', "circleGuideLabelSmall")
             .style("text-anchor", "start")
             .text(defaultLabelSmall);
-        d3.select("#" + leftPanelID).append("text")
+        d3.select("#" + leftPanelID)
+            .append("text")
             .attr("x", cx2 + 10)
             .attr("y", mdsheight + 2 * newMedium)
             .attr('class', "circleGuideLabelMedium")
             .style("text-anchor", "start")
             .text(defaultLabelMedium);
-        d3.select("#" + leftPanelID).append("text")
+        d3.select("#" + leftPanelID)
+            .append("text")
             .attr("x", cx2 + 10)
             .attr("y", mdsheight + 2 * newLarge)
             .attr('class', "circleGuideLabelLarge")
@@ -465,10 +462,10 @@ var LDAvis = function(to_select, data_or_file_name) {
             .style("text-anchor", "middle");
 
         var y = d3.scale.ordinal()
-                .domain(vis_state.lamDataTerms())
+                .domain(vis_state.get('lamTopicTerms'))
                 .rangeRoundBands([0, barheight], 0.15);
         var x = d3.scale.linear()
-                .domain([1, d3.max(vis_state.defaultData(), function(d) {return d.Total;})])
+                .domain([1, d3.max(vis_state.get('lamTopicData'), function(d) {return d.Total;})])
                 .range([0, barwidth])
                 .nice();
         var yAxis = d3.svg.axis().scale(y);
@@ -528,7 +525,7 @@ var LDAvis = function(to_select, data_or_file_name) {
 
         // Bind 'default' data to 'default' bar chart
         var basebars = chart.selectAll(to_select + " .bar-totals")
-                .data(vis_state.defaultData())
+                .data(vis_state.get('lamTopicData'))
                 .enter();
 
         // Draw the gray background bars defining the overall frequency of each word
@@ -703,27 +700,27 @@ var LDAvis = function(to_select, data_or_file_name) {
         // function to re-order the bars (gray and red), and terms:
         function reorder_bars(increase) {
             var y = d3.scale.ordinal()
-                    .domain(vis_state.lamData3Terms())
+                    .domain(vis_state.get('lamTopicTerms'))
                     .rangeRoundBands([0, barheight], 0.15);
             var x = d3.scale.linear()
-                    .domain([1, vis_state.lamMax()])
+                    .domain([1, vis_state.get('lamTopicMax')])
                     .range([0, barwidth])
                     .nice();
 
             // Change Total Frequency bars
             var graybars = d3.select("#" + barFreqsID)
                     .selectAll(to_select + " .bar-totals")
-                    .data(vis_state.lamTopicData(), function(d) {return d.Term;});
+                    .data(vis_state.get('lamTopicData'), function(d) {return d.Term;});
 
             // Change word labels
             var labels = d3.select("#" + barFreqsID)
                     .selectAll(to_select + " .terms")
-                    .data(vis_state.lamTopicData(), function(d) {return d.Term;});
+                    .data(vis_state.get('lamTopicData'), function(d) {return d.Term;});
 
             // Create red bars (drawn over the gray ones) to signify the frequency under the selected topic
             var redbars = d3.select("#" + barFreqsID)
                     .selectAll(to_select + " .overlay")
-                    .data(vis_state.lamTopicData(), function(d) {return d.Term;});
+                    .data(vis_state.get('lamTopicData'), function(d) {return d.Term;});
 
             // adapted from http://bl.ocks.org/mbostock/1166403
             var xAxis = d3.svg.axis().scale(x)
@@ -885,16 +882,13 @@ var LDAvis = function(to_select, data_or_file_name) {
                 // remove the red bars
                 d3.selectAll(to_select + " .overlay").remove();
 
-                // go back to 'default' bar chart
-                var dat2 = vis_state.get('lamData').filter(function(d) {
-                    return d.Category == "Default";
-                });
+                var dat2 = vis_state.get('lamTopicData');
 
                 var y = d3.scale.ordinal()
-                        .domain(dat2.map(function(d) {return d.Term;}))
+                        .domain(vis_state.get('lamTopicTerms'))
                         .rangeRoundBands([0, barheight], 0.15);
                 var x = d3.scale.linear()
-                        .domain([1, d3.max(dat2, function(d) {return d.Total;})])
+                        .domain([1, vis_state.get('lamTopicMax')])
                         .range([0, barwidth])
                         .nice();
 
@@ -954,30 +948,14 @@ var LDAvis = function(to_select, data_or_file_name) {
                     .style("font-size", "16px")
                     .text("Top-" + vis_state.get('R') + " Most Relevant Terms for Topic " + topic + " (" + Freq + "% of tokens)");
 
-                // TODO
-                // grab the bar-chart data for this topic only:
-                var dat2 = vis_state.get('lamData').filter(function(d) {
-                    return d.Category == "Topic" + topic;
-                });
-
-                // define relevance:
-                for (var i = 0; i < dat2.length; i++) {
-                    dat2[i].relevance = vis_state.get('lambda') * dat2[i].logprob +
-                        (1 - vis_state.get('lambda')) * dat2[i].loglift;
-                }
-
-                // sort by relevance:
-                dat2.sort(fancysort("relevance"));
-
-                // truncate to the top R tokens:
-                var dat3 = dat2.slice(0, vis_state.get('R'));
+                var dat3 = vis_state.get('lamTopicData');
 
                 // scale the bars to the top R terms:
                 var y = d3.scale.ordinal()
-                        .domain(dat3.map(function(d) {return d.Term;}))
+                        .domain(vis_state.get('lamTopicTerms'))
                         .rangeRoundBands([0, barheight], 0.15);
                 var x = d3.scale.linear()
-                        .domain([1, d3.max(dat3, function(d) {return d.Total;})])
+                        .domain([1, vis_state.get('lamTopicMax')])
                         .range([0, barwidth])
                         .nice();
 
@@ -1010,13 +988,9 @@ var LDAvis = function(to_select, data_or_file_name) {
                     .append("rect")
                     .attr("class", "overlay")
                     .attr("x", 0)
-                    .attr("y", function(d) {
-                        return y(d.Term);
-                    })
+                    .attr("y", function(d) {return y(d.Term);})
                     .attr("height", y.rangeBand())
-                    .attr("width", function(d) {
-                        return x(d.Freq);
-                    })
+                    .attr("width", function(d) {return x(d.Freq);})
                     .style("fill", color2)
                     .attr("opacity", 0.8);
 
@@ -1063,11 +1037,7 @@ var LDAvis = function(to_select, data_or_file_name) {
                 var el = vis_state.getElem("term", term);
                 el.style["fontWeight"] = "bold";
 
-                // TODO take care of automagically when setting term
-                var dat2 = vis_state.get('mdsData3').filter(function(d2) {
-                    return d2.Term == term;
-                });
-                // TODO this may need to be fixed to slice at R
+                var dat2 = vis_state.get('termFiltered');
 
                 var k = dat2.length;
 
@@ -1075,7 +1045,6 @@ var LDAvis = function(to_select, data_or_file_name) {
                 for (var i = 0; i < vis_state.get('K'); ++i) {
                     radius[i] = 0;
                 }
-                // TODO should the two values of k be different here?
                 for (i = 0; i < k; i++) {
                     radius[dat2[i].Topic - 1] = dat2[i].Freq;
                 }
@@ -1106,9 +1075,7 @@ var LDAvis = function(to_select, data_or_file_name) {
                 d3.selectAll(to_select + " .txt")
                     .data(size)
                     .transition()
-                    .style("font-size", function(d) {
-                        return +d;
-                    });
+                    .style("font-size", function(d) {return +d;});
 
                 // Alter the guide
                 d3.select(to_select + " .circleGuideTitle")
