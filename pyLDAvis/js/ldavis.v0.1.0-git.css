@@ -25,3 +25,7 @@ text {
     font-family: sans-serif;
     font-size: 11px;
 }
+
+.top > div {
+  box-sizing: border-box;
+}

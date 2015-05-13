@@ -171,18 +171,7 @@ var LDAvis = function(to_select, data_or_file_name) {
     var duration = 750;
 
     // Set global margins used for everything
-    var margin = {
-        top: 30,
-        right: 30,
-        bottom: 70,
-        left: 30
-    },
-        mdswidth = 530,
-        mdsheight = 530,
-        barwidth = 530,
-        barheight = 530,
-        termwidth = 90, // width to add between two panels to display terms
-        mdsarea = mdsheight * mdswidth;
+    var margin = {top: 30, right: 30, bottom: 70, left: 30};
 
     // proportion of area of MDS plot to which the sum of default topic circle areas is set
     var circle_prop = 0.25;
@@ -214,6 +203,24 @@ var LDAvis = function(to_select, data_or_file_name) {
     var lambdaLabelID = visID + "-lamlabel";
 
     var vis_state;
+
+    var el = document.getElementById(visID);
+    var w = el.offsetWidth;
+    var h = el.offsetHeight; // TODO may not be used all that much
+
+
+    var col_percent_width = 0.45;
+    var term_percent_width = 0.07;
+
+    var mdswidth = Math.floor(w * col_percent_width);
+    var mdsheight = mdswidth,
+        barwidth = mdswidth,
+        barheight = mdswidth;
+    var termwidth = Math.floor(w * term_percent_width);
+    var mdsarea = mdsheight * mdswidth;
+    w = (mdswidth*2 + termwidth);
+
+    console.log('--- w,h', mdswidth, termwidth, (mdswidth + mdswidth + termwidth), w);
 
     //////////////////////////////////////////////////////////////////////////////
 
@@ -581,7 +588,8 @@ var LDAvis = function(to_select, data_or_file_name) {
             // create container div for topic and lambda input:
             var inputDiv = document.createElement("div");
             inputDiv.setAttribute("id", topID);
-            inputDiv.setAttribute("style", "width: 1210px"); // to match the width of the main svg element
+            inputDiv.setAttribute("class", 'top');
+            //inputDiv.setAttribute("style", "width: " + w + "px"); // to match the width of the main svg element
             document.getElementById(visID).appendChild(inputDiv);
 
             // topic input container:
@@ -592,6 +600,7 @@ var LDAvis = function(to_select, data_or_file_name) {
             var topicLabel = document.createElement("label");
             topicLabel.setAttribute("for", topicID);
             topicLabel.setAttribute("style", "font-family: sans-serif; font-size: 14px");
+            // TODO update this span on topic change
             topicLabel.innerHTML = "Selected Topic: <span id='" + topicID + "-value'></span>";
             topicDiv.appendChild(topicLabel);
 
@@ -668,6 +677,7 @@ var LDAvis = function(to_select, data_or_file_name) {
             lambdaLabel.setAttribute("id", lambdaLabelID);
             lambdaLabel.setAttribute("for", lambdaID);
             lambdaLabel.setAttribute("style", "height: 20px; width: 60px; font-family: sans-serif; font-size: 14px; margin-left: 80px");
+            // TODO update inner span on lambda change
             lambdaLabel.innerHTML = "&#955 = <span id='" + lambdaID + "-value'>" + vis_state.get('lambda') + "</span>";
             lambdaDiv.appendChild(lambdaLabel);
 
@@ -1085,6 +1095,32 @@ var LDAvis = function(to_select, data_or_file_name) {
         });
 
         vis_state.load();
+
+        var layout = function() {
+            console.log('layout');
+
+            w = el.offsetWidth;
+
+            mdswidth = Math.floor(w * col_percent_width);
+            mdsheight = barwidth = barheight = mdswidth;
+            termwidth = Math.floor(w * term_percent_width);
+            mdsarea = mdswidth * mdsheight;
+            w = (mdswidth*2 + termwidth);
+            console.log('--- w,h', mdswidth, termwidth, (mdswidth + mdswidth + termwidth), w);
+
+
+            ////////////////////////////////////////////
+            // Forms
+            ////////////////////////////////////////////
+            console.log('-', visID, topID);
+            var inputDiv = document.getElementById(topID);
+            console.log(inputDiv);
+            inputDiv.setAttribute("style", "width:" + w + "px");
+        };
+
+        layout();
+
+        window.onresize = function(event) {layout();};
     }
 
     if (typeof data_or_file_name === 'string')
