@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Topic Models (LDA) visualization using D3
+Topic Models (e.g. LDA) visualization using D3
 =============================================
 
 Functions: General Use
@@ -9,16 +9,16 @@ Functions: General Use
     transform and prepare a LDA model's data for visualization
 
 :func:`prepared_data_to_html`
-    convert prepared data to a html string
+    convert prepared data to an html string
 
 :func:`show`
-    launch a web server to view the d3/html visualization
+    launch a web server to view the visualization
 
 :func:`save_html`
     save a visualization to a standalone html file
 
 :func:`save_json`
-    save a JSON representation of a figure to file
+    save the visualization JSON data of to a file
 
 
 Functions: IPython Notebook
@@ -34,11 +34,11 @@ Functions: IPython Notebook
 """
 
 __all__ = ["__version__",
-           "prepare", "prepared_data_to_html",
-           "display", "show", #"save_html", "save_json",
+           "prepare", "js_PCoA", "PreparedData", "prepared_data_to_html",
+           "display", "show", "save_html", "save_json",
            "enable_notebook", "disable_notebook"]
 
-__version__ = '0.1.0-git'
+__version__ = '1.2.0'
 
 from ._display import *
-from .prepare import prepare
+from ._prepare import prepare, js_PCoA, PreparedData

@@ -4,11 +4,13 @@ pyLDAvis Utilities
 Utility routines for the pyLDAvis package
 """
 
+import json
 import os
 import re
 import shutil
 import warnings
 from functools import wraps
+import numpy as np
 from . import urls
 
 # Make sure that DeprecationWarning gets printed
@@ -39,19 +41,6 @@ def get_id(obj, suffix="", prefix="el", warn_on_invalid=True):
         warnings.warn('"{0}" is not a valid html ID. This may cause problems')
 
     return objid
-
-
-def deprecated(func, old_name, new_name):
-    """Decorator to mark functions as deprecated."""
-    @wraps(func)
-    def new_func(*args, **kwargs):
-        warnings.warn(("{0} is deprecated and will be removed.  "
-                       "Use {1} instead".format(old_name, new_name)),
-                      category=DeprecationWarning)
-        return func(*args, **kwargs)
-    new_func.__doc__ = ("*%s is deprecated: use %s instead*\n\n    "
-                        % (old_name, new_name)) + new_func.__doc__
-    return new_func
 
 
 def write_ipynb_local_js(location=None, d3_src=None, ldavis_src=None, ldavis_css=None):
@@ -147,3 +136,9 @@ def write_ipynb_local_js(location=None, d3_src=None, ldavis_src=None, ldavis_css
 
 
     return prefix + d3js, prefix + ldavisjs, prefix + ldaviscss
+
+class NumPyEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.int64) or isinstance(obj, np.int32):
+            return int(obj)
+        return json.JSONEncoder.default(self, obj)

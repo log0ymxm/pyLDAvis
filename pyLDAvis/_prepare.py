@@ -1,20 +1,28 @@
+"""
+pyLDAvis Prepare
+===============
+Main transformation functions for preparing LDAdata to the visualization's data structures
+"""
+
 from collections import namedtuple
 import json
-
 from joblib import Parallel, delayed, cpu_count
 import numpy as np
 import pandas as pd
-from skbio.stats.ordination import PCoA
-from skbio.stats.distance import DistanceMatrix
-
 import scipy.spatial.distance as dist
 from scipy.stats import entropy
+from skbio.stats.ordination import PCoA
+from skbio.stats.distance import DistanceMatrix
+from .utils import NumPyEncoder
+
 
 def __num_dist_rows__(array, ndigits=2):
    return int(pd.DataFrame(array).sum(axis=1).map(lambda x: round(x, ndigits)).sum())
 
+
 class ValidationError(ValueError):
    pass
+
 
 def _input_check(topic_term_dists, doc_topic_dists, doc_lengths, vocab, term_frequency):
    ttds = topic_term_dists.shape
@@ -44,19 +52,34 @@ def _input_check(topic_term_dists, doc_topic_dists, doc_lengths, vocab, term_fre
    if len(errors) > 0:
       return errors
 
+
 def _input_validate(*args):
    res = _input_check(*args)
    if res:
       raise ValidationError('\n' + '\n'.join([' * ' + s for s in res]))
 
-def jensen_shannon(_P, _Q):
+
+def _jensen_shannon(_P, _Q):
     _M = 0.5 * (_P + _Q)
     return 0.5 * (entropy(_P, _M) + entropy(_Q, _M))
 
+
 def js_PCoA(distributions):
-   dist_matrix = DistanceMatrix(dist.squareform(dist.pdist(distributions.values, jensen_shannon)))
+   """Dimension reduction via Jensen-Shannon Divergence & Principal Components
+
+    Parameters
+    ----------
+    distributions : array-like, shape (`n_dists`, `k`)
+        Matrix of distributions probabilities.
+
+    Returns
+    -------
+    pcoa : array, shape (`n_dists`, 2)
+   """
+   dist_matrix = DistanceMatrix(dist.squareform(dist.pdist(distributions.values, _jensen_shannon)))
    pcoa = PCoA(dist_matrix).scores()
    return pcoa.site[:,0:2]
+
 
 def _df_with_names(data, index_name, columns_name):
    if type(data) == pd.DataFrame:
@@ -67,6 +90,7 @@ def _df_with_names(data, index_name, columns_name):
    df.index.name = index_name
    df.columns.name = columns_name
    return df
+
 
 def _series_with_name(data, name):
    if type(data) == pd.Series:
@@ -86,11 +110,13 @@ def _topic_coordinates(mds, topic_term_dists, topic_proportion):
    # note: cluster (should?) be deprecated soon. See: https://github.com/cpsievert/LDAvis/issues/26
    return mds_df
 
+
 def _chunks(l, n):
     """ Yield successive n-sized chunks from l.
     """
-    for i in xrange(0, len(l), n):
+    for i in range(0, len(l), n):
         yield l[i:i+n]
+
 
 def _job_chunks(l, n_jobs):
    n_chunks = n_jobs
@@ -101,14 +127,13 @@ def _job_chunks(l, n_jobs):
    return _chunks(l, n_chunks)
 
 
-
 def _find_relevance(log_ttd, log_lift, R, lambda_):
    relevance = lambda_ * log_ttd + (1 - lambda_) * log_lift
    return relevance.T.apply(lambda s: s.order(ascending=False).index).head(R)
 
 
 def _find_relevance_chunks(log_ttd, log_lift, R, lambda_seq):
-   return pd.concat(map(lambda l: _find_relevance(log_ttd, log_lift, R, l), lambda_seq))
+   return pd.concat([_find_relevance(log_ttd, log_lift, R, l) for l in lambda_seq])
 
 
 def _topic_info(topic_term_dists, topic_proportion, term_frequency, term_topic_freq, vocab, lambda_step, R, n_jobs):
@@ -136,8 +161,8 @@ def _topic_info(topic_term_dists, topic_proportion, term_frequency, term_topic_f
    log_ttd = np.log(topic_term_dists)
    lambda_seq = np.arange(0, 1 + lambda_step, lambda_step)
 
-   def topic_top_term_df((i, (original_topic_id, topic_terms))):
-      new_topic_id = i + 1
+   def topic_top_term_df(tup):
+      new_topic_id, (original_topic_id, topic_terms) = tup
       term_ix = topic_terms.unique()
       return pd.DataFrame({'Term': vocab[term_ix], \
                            'Freq': term_topic_freq.loc[original_topic_id, term_ix], \
@@ -148,8 +173,9 @@ def _topic_info(topic_term_dists, topic_proportion, term_frequency, term_topic_f
 
    top_terms = pd.concat(Parallel(n_jobs=n_jobs)(delayed(_find_relevance_chunks)(log_ttd, log_lift, R, ls) \
                                                  for ls in _job_chunks(lambda_seq, n_jobs)))
-   topic_dfs = map(topic_top_term_df, enumerate(top_terms.T.iterrows()))
-   return pd.concat([default_term_info] + topic_dfs)
+   topic_dfs = map(topic_top_term_df, enumerate(top_terms.T.iterrows(), 1))
+   return pd.concat([default_term_info] + list(topic_dfs))
+
 
 def _token_table(topic_info, term_topic_freq, vocab, term_frequency):
    # last, to compute the areas of the circles when a term is highlighted
@@ -176,20 +202,82 @@ def _token_table(topic_info, term_topic_freq, vocab, term_frequency):
    token_table['Freq'] = token_table.Freq / term_frequency[token_table.index]
    return token_table.sort(['Term', 'Topic'])
 
+
 def _term_topic_freq(topic_term_dists, topic_freq, term_frequency):
    term_topic_freq = (topic_term_dists.T  * topic_freq).T
    # adjust to match term frequencies exactly (get rid of rounding error)
    err = term_frequency / term_topic_freq.sum()
    return term_topic_freq * err
 
-def prepare(topic_term_dists, doc_topic_dists, doc_lengths, vocab, term_frequency, R=30, lambda_step = 0.01, \
-            mds=js_PCoA, plot_opts={'xlab': 'PC1', 'ylab': 'PC2'}, n_jobs=-1):
+
+def prepare(topic_term_dists, doc_topic_dists, doc_lengths, vocab, term_frequency, \
+            R=30, lambda_step=0.01, mds=js_PCoA, n_jobs=-1, \
+            plot_opts={'xlab': 'PC1', 'ylab': 'PC2'}):
+   """Transforms the topic model distributions and related corpus data into
+   the data structures needed for the visualization.
+
+    Parameters
+    ----------
+    topic_term_dists : array-like, shape (`n_topics`, `n_terms`)
+        Matrix of topic-term probabilities. Where `n_terms` is `len(vocab)`.
+    doc_topic_dists : array-like, shape (`n_docs`, `n_topics`)
+        Matrix of document-topic probabilities.
+    doc_lengths : array-like, shape `n_docs`
+        The length of each document, i.e. the number of words in each document.
+        The order of the numbers should be consistent with the ordering of the
+        docs in `doc_topic_dists`.
+    vocab : array-like, shape `n_terms`
+        List of all the words in the corpus used to train the model.
+    term_frequency : array-like, shape `n_terms`
+        The count of each particular term over the entire corpus. The ordering
+        of these counts should correspond with `vocab` and `topic_term_dists`.
+    R : int
+        The number of terms to display in the barcharts of the visualization.
+        Default is 30. Recommended to be roughly between 10 and 50.
+    lambda_step : float, between 0 and 1
+        Determines the interstep distance in the grid of lambda values over
+        which to iterate when computing relevance.
+        Default is 0.01. Recommended to be between 0.01 and 0.1.
+    mds : function
+        A function that takes `topic_term_dists` as an input and outputs a
+        `n_topics` by `2`  distance matrix. The output approximates the distance
+        between topics. See :func:`js_PCoA` for details on the default function.
+    n_jobs: int
+        The number of cores to be used to do the computations. The regular
+        joblib conventions are followed so `-1`, which is the default, will
+        use all cores.
+    plot_opts : dict, with keys 'xlab' and `ylab`
+        Dictionary of plotting options, right now only used for the axis labels.
+
+    Returns
+    -------
+    prepared_data : PreparedData
+        A named tuple containing all the data structures required to create
+        the visualization. To be passed on to functions like :func:`display`.
+
+    Notes
+    -----
+    This implements the method of `Sievert, C. and Shirley, K. (2014):
+    LDAvis: A Method for Visualizing and Interpreting Topics, ACL Workshop on
+    Interactive Language Learning, Visualization, and Interfaces.`
+
+    http://nlp.stanford.edu/events/illvi2014/papers/sievert-illvi2014.pdf
+
+    See Also
+    --------
+    :func:`save_json`: save json representation of a figure to file
+    :func:`save_html` : save html representation of a figure to file
+    :func:`show` : launch a local server and show a figure in a browser
+    :func:`display` : embed figure within the IPython notebook
+    :func:`enable_notebook` : automatically embed visualizations in IPython notebook
+   """
    topic_term_dists = _df_with_names(topic_term_dists, 'topic', 'term')
    doc_topic_dists  = _df_with_names(doc_topic_dists, 'doc', 'topic')
    term_frequency   = _series_with_name(term_frequency, 'term_frequency')
    doc_lengths      = _series_with_name(doc_lengths, 'doc_length')
    vocab            = _series_with_name(vocab, 'vocab')
    _input_validate(topic_term_dists, doc_topic_dists, doc_lengths, vocab, term_frequency)
+   R = min(R, len(vocab))
 
    topic_freq       = (doc_topic_dists.T * doc_lengths).T.sum()
    topic_proportion = (topic_freq / topic_freq.sum()).order(ascending=False)
@@ -219,3 +307,6 @@ class PreparedData(namedtuple('PreparedData', ['topic_coordinates', 'topic_info'
                'lambda.step': self.lambda_step,
                'plot.opts': self.plot_opts,
                'topic.order': self.topic_order}
+
+    def to_json(self):
+       return json.dumps(self.to_dict(), cls=NumPyEncoder)
