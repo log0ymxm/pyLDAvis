@@ -38,16 +38,16 @@ def _input_check(topic_term_dists, doc_topic_dists, doc_lengths, vocab, term_fre
       err('Length of doc_lengths not equal to the number of rows in doc_topic_dists; both should be equal to the number of documents in the data.')
 
    W = len(vocab)
-   if ttds[1] != W:
-      err('Number of terms in vocabulary does not match the number of columns of topic_term_dists (where each row of topic_term_dists is a probability distribution of terms for a given topic).')
+   # if ttds[1] != W:
+   #    err('Number of terms in vocabulary does not match the number of columns of topic_term_dists (where each row of topic_term_dists is a probability distribution of terms for a given topic).')
    if len(term_frequency) != W:
       err('Length of term_frequency not equal to the number of terms in the vocabulary (len of vocab).')
 
    if __num_dist_rows__(topic_term_dists) != ttds[0]:
       err('Not all rows (distributions) in topic_term_dists sum to 1.')
 
-   if __num_dist_rows__(doc_topic_dists) != dtds[0]:
-      err('Not all rows (distributions) in doc_topic_dists sum to 1.')
+   # if __num_dist_rows__(doc_topic_dists) != dtds[0]:
+   #    err('Not all rows (distributions) in doc_topic_dists sum to 1.')
 
    if len(errors) > 0:
       return errors
